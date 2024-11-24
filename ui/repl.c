@@ -5,6 +5,7 @@
   system startup, main(), and console interaction
 */
 
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
@@ -41,6 +42,8 @@ __attribute__((constructor)) void jl_register_ptls_states_getter(void)
     jl_set_ptls_states_getter(jl_get_ptls_states_static);
 }
 #endif
+
+extern int lj_initialized;
 
 static int exec_program(char *program)
 {
@@ -116,7 +119,6 @@ static NOINLINE int true_main(int argc, char *argv[])
 {
     jl_ptls_t ptls = jl_get_ptls_states();
     jl_set_ARGS(argc, argv);
-
     jl_function_t *start_client = jl_base_module ?
         (jl_function_t*)jl_get_global(jl_base_module, jl_symbol("_start")) : NULL;
 
@@ -124,7 +126,11 @@ static NOINLINE int true_main(int argc, char *argv[])
         JL_TRY {
             size_t last_age = jl_get_ptls_states()->world_age;
             jl_get_ptls_states()->world_age = jl_get_world_counter();
+            lj_initialized = 1;
+
             jl_apply(&start_client, 1);
+
+            lj_initialized = 0;
             jl_get_ptls_states()->world_age = last_age;
         }
         JL_CATCH {

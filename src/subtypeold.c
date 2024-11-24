@@ -98,8 +98,6 @@ typedef struct {
 
 JL_DLLEXPORT int lj_initialized = 0;
 
-JL_DLLEXPORT int jl_subtype2(jl_value_t *x, jl_value_t *y);
-
 // state manipulation utilities
 
 // look up a type variable in an environment
@@ -363,8 +361,8 @@ static jl_value_t *simple_join(jl_value_t *a, jl_value_t *b)
     if (jl_is_kind(b) && jl_is_type_type(a) && jl_typeof(jl_tparam0(a)) == b)
         return b;
     if (!jl_has_free_typevars(a) && !jl_has_free_typevars(b)) {
-        if (jl_subtype2(a, b)) return b;
-        if (jl_subtype2(b, a)) return a;
+        if (jl_subtype(a, b)) return b;
+        if (jl_subtype(b, a)) return a;
     }
     return jl_new_struct(jl_uniontype_type, a, b);
 }
@@ -766,7 +764,7 @@ static int subtype_tuple(jl_datatype_t *xd, jl_datatype_t *yd, jl_stenv_t *e, in
         }
         else if (e->Runions.depth == 0 && e->Lunions.depth == 0 && !jl_has_free_typevars(xi) && !jl_has_free_typevars(yi)) {
             // fast path for separable sub-formulas
-            if (!jl_subtype2(xi, yi))
+            if (!jl_subtype(xi, yi))
                 return 0;
         }
         else if (!subtype(xi, yi, e, param)) {
@@ -1064,35 +1062,6 @@ static int subtype_in_env(jl_value_t *x, jl_value_t *y, jl_stenv_t *e)
 
 JL_DLLEXPORT int jl_subtype(jl_value_t *x, jl_value_t *y)
 {
-    int r = jl_subtype2(x, y);
-    if (!lj_initialized)
-      return r;
-
-    if (x != y) {
-
-      // switch to blocking output
-      int streamno = STDERR_FILENO; //STDOUT_FILENO;
-      int old_flags = fcntl(streamno, F_GETFL);
-      fcntl(streamno, F_SETFL,
-                    old_flags & ~O_NONBLOCK);
-
-      if(jl_has_free_typevars(x) || jl_has_free_typevars(y)) {
-	jl_printf(JL_STDERR, "subt-fv:\n");
-      } else {
-	jl_printf(JL_STDERR, "subt:\n");
-      }
-      jl_(x);
-      jl_(y);
-      jl_printf(JL_STDERR, "%d\n\n", r);
-
-      // switch back to nonblocking output
-      fcntl(streamno, F_SETFL, old_flags);
-    }
-    return r;
-}
-
-JL_DLLEXPORT int jl_subtype2(jl_value_t *x, jl_value_t *y)
-{
     return jl_subtype_env(x, y, NULL, 0);
 }
 
@@ -1100,7 +1069,7 @@ JL_DLLEXPORT int jl_types_equal(jl_value_t *a, jl_value_t *b)
 {
     if (obviously_egal(a, b))    return 1;
     if (obviously_unequal(a, b)) return 0;
-    return jl_subtype2(a, b) && jl_subtype2(b, a);
+    return jl_subtype(a, b) && jl_subtype(b, a);
 }
 
 int jl_tuple_isa(jl_value_t **child, size_t cl, jl_datatype_t *pdt)
@@ -1118,7 +1087,7 @@ int jl_tuple_isa(jl_value_t **child, size_t cl, jl_datatype_t *pdt)
     jl_value_t *tu = (jl_value_t*)arg_type_tuple(child, cl);
     int ans;
     JL_GC_PUSH1(&tu);
-    ans = jl_subtype2(tu, (jl_value_t*)pdt);
+    ans = jl_subtype(tu, (jl_value_t*)pdt);
     JL_GC_POP();
     return ans;
 }
@@ -1165,19 +1134,19 @@ JL_DLLEXPORT int jl_isa(jl_value_t *x, jl_value_t *t)
                         while (jl_is_typevar(tp))
                             tp = ((jl_tvar_t*)tp)->ub;
                         if (!jl_has_free_typevars(tp))
-                            return jl_subtype2(x, tp);
+                            return jl_subtype(x, tp);
                     }
                 }
                 else {
                     return 0;
                 }
             }
-            if (jl_subtype2(jl_typeof(x), t))
+            if (jl_subtype(jl_typeof(x), t))
                 return 1;
             if (jl_has_intersect_type_not_kind(t2)) {
                 JL_GC_PUSH1(&x);
                 x = (jl_value_t*)jl_wrap_Type(x);  // TODO jb/subtype avoid jl_wrap_Type
-                int ans = jl_subtype2(x, t);
+                int ans = jl_subtype(x, t);
                 JL_GC_POP();
                 return ans;
             }
@@ -1186,7 +1155,7 @@ JL_DLLEXPORT int jl_isa(jl_value_t *x, jl_value_t *t)
     }
     if (jl_is_leaf_type(t))
         return 0;
-    return jl_subtype2(jl_typeof(x), t);
+    return jl_subtype(jl_typeof(x), t);
 }
 
 // type intersection
@@ -1786,7 +1755,7 @@ static jl_value_t *intersect_sub_datatype(jl_datatype_t *xd, jl_datatype_t *yd, 
 static jl_value_t *intersect_invariant(jl_value_t *x, jl_value_t *y, jl_stenv_t *e)
 {
     if (!jl_has_free_typevars(x) && !jl_has_free_typevars(y)) {
-        return (jl_subtype2(x,y) && jl_subtype2(y,x)) ? y : NULL;
+        return (jl_subtype(x,y) && jl_subtype(y,x)) ? y : NULL;
     }
     e->invdepth++;
     jl_value_t *ii = intersect(x, y, e, 2);
@@ -1935,8 +1904,8 @@ static jl_value_t *intersect(jl_value_t *x, jl_value_t *y, jl_stenv_t *e, int pa
         return intersect_var((jl_tvar_t*)y, x, e, 1, param);
     }
     if (!jl_has_free_typevars(x) && !jl_has_free_typevars(y)) {
-        if (jl_subtype2(x, y)) return x;
-        if (jl_subtype2(y, x)) return y;
+        if (jl_subtype(x, y)) return x;
+        if (jl_subtype(y, x)) return y;
     }
     if (jl_is_uniontype(x)) {
         if (y == ((jl_uniontype_t*)x)->a || y == ((jl_uniontype_t*)x)->b)
@@ -1972,9 +1941,9 @@ static jl_value_t *intersect(jl_value_t *x, jl_value_t *y, jl_stenv_t *e, int pa
             }
             free(se.buf);
             if (!jl_has_free_typevars(a) && !jl_has_free_typevars(b)) {
-                if (jl_subtype2(a, b))
+                if (jl_subtype(a, b))
                     res = b;
-                else if (jl_subtype2(b, a))
+                else if (jl_subtype(b, a))
                     res = a;
             }
             if (!res) res = simple_join(a, b);
@@ -2163,7 +2132,7 @@ jl_value_t *jl_type_intersection_env_s(jl_value_t *a, jl_value_t *b, jl_svec_t *
         *ans = a; sz = szb;
         if (issubty) *issubty = 1;
     }
-    else if (jl_subtype2(b, a)) {
+    else if (jl_subtype(b, a)) {
         *ans = b;
     }
     else {
@@ -2264,7 +2233,7 @@ static int sub_msp(jl_value_t *a, jl_value_t *b, jl_typeenv_t *env)
         b = jl_type_unionall(env->var, b);
         env = env->prev;
     }
-    int sub = jl_subtype2(a, b);
+    int sub = jl_subtype(a, b);
     JL_GC_POP();
     return sub;
 }
@@ -2620,37 +2589,11 @@ static int type_morespecific_(jl_value_t *a, jl_value_t *b, int invariant, jl_ty
 
 JL_DLLEXPORT int jl_type_morespecific(jl_value_t *a, jl_value_t *b)
 {
-    int rv = 0;
-
-    if (obviously_disjoint(a, b, 1)) {
-        rv = 0;
-    }
-    else if (jl_subtype2(b, a)) {
-      rv = 0;
-    } else if (jl_subtype2(a, b)) {
-      rv = 1;
-    } else {
-      rv = type_morespecific_(a, b, 0, NULL);
-    }
-
-    if (lj_initialized) {
-        if (a != b) {
-          // switch to blocking output
-          int stream = STDERR_FILENO; //STDOUT_FILENO;
-          int old_flags = fcntl(stream, F_GETFL);
-          fcntl(stream, F_SETFL,
-                        old_flags & ~O_NONBLOCK);
-
-          jl_printf(JL_STDERR, "spec:\n");
-          jl_(a);
-          jl_(b);
-          jl_printf(JL_STDERR, "%d\n\n", rv);
-
-          // switch back to nonblocking output
-          fcntl(stream, F_SETFL, old_flags);
-        }
-    }
-    return rv;
+    if (obviously_disjoint(a, b, 1))
+        return 0;
+    if (jl_subtype(b, a)) return 0;
+    if (jl_subtype(a, b)) return 1;
+    return type_morespecific_(a, b, 0, NULL);
 }
 
 JL_DLLEXPORT int jl_type_morespecific_no_subtype(jl_value_t *a, jl_value_t *b)
